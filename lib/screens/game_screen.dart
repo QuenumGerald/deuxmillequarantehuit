@@ -1,7 +1,11 @@
+// game_screen.dart
+
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'dart:io';
 
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
@@ -50,6 +54,10 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   final AudioPlayer audioPlayer = AudioPlayer();
   late List<Source> popSounds;
   bool isMoving = false;
+  BannerAd? _bannerAd;
+  InterstitialAd? _interstitialAd;
+  bool _isInterstitialAdReady = false;
+  int _gameCount = 0;
 
   // Constantes pour la grille
   static const double cellSize = 75.0;       // Taille d'une cellule
@@ -60,20 +68,108 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    MobileAds.instance.initialize();
+    _loadBannerAd();
+    _loadInterstitialAd();
+    _initializeGame();
     popSounds = [
       AssetSource('merge.mp3'),
       AssetSource('merge1.mp3'),
       AssetSource('merge2.mp3'),
     ];
     audioPlayer.setReleaseMode(ReleaseMode.stop);
-    _initializeGame();
+  }
+
+  void _loadBannerAd() {
+    _bannerAd = BannerAd(
+      adUnitId: Platform.isAndroid
+          ? 'ca-app-pub-3940256099942544/6300978111' // ID de test Android
+          : 'ca-app-pub-3940256099942544/2934735716', // ID de test iOS
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (_) {
+          setState(() {});
+        },
+        onAdFailedToLoad: (ad, error) {
+          debugPrint('Échec du chargement de la bannière : $error');
+          ad.dispose();
+          _bannerAd = null;
+          // Réessayer de charger la pub après un échec
+          Future.delayed(const Duration(minutes: 1), _loadBannerAd);
+        },
+      ),
+    );
+    _bannerAd?.load();
+  }
+
+  void _loadInterstitialAd() {
+    InterstitialAd.load(
+      adUnitId: Platform.isAndroid
+          ? 'ca-app-pub-3940256099942544/1033173712' // ID de test Android
+          : 'ca-app-pub-3940256099942544/4411468910', // ID de test iOS
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          _interstitialAd = ad;
+          _isInterstitialAdReady = true;
+
+          // Configurer le callback de fermeture
+          _interstitialAd?.fullScreenContentCallback = FullScreenContentCallback(
+            onAdDismissedFullScreenContent: (ad) {
+              _isInterstitialAdReady = false;
+              ad.dispose();
+              _loadInterstitialAd(); // Recharger pour la prochaine fois
+            },
+            onAdFailedToShowFullScreenContent: (ad, error) {
+              _isInterstitialAdReady = false;
+              ad.dispose();
+              _loadInterstitialAd(); // Réessayer de charger
+            },
+          );
+        },
+        onAdFailedToLoad: (error) {
+          debugPrint('Échec du chargement de l\'interstitielle : $error');
+          _isInterstitialAdReady = false;
+          // Réessayer de charger après un délai
+          Future.delayed(const Duration(minutes: 1), _loadInterstitialAd);
+        },
+      ),
+    );
+  }
+
+  void _showInterstitialAd() {
+    if (_isInterstitialAdReady && _interstitialAd != null) {
+      _interstitialAd?.show();
+    }
   }
 
   void _initializeGame() {
     tiles = [];
     _addRandomTile();
     _addRandomTile();
+  }
 
+  void _resetGame() {
+    _gameCount++;
+    if (_gameCount % 2 == 0) { // Afficher une pub toutes les 2 parties
+      _showInterstitialAd();
+    }
+
+    setState(() {
+      for (var tile in tiles) {
+        tile.appearAnimationController?.dispose();
+        tile.mergeAnimationController?.dispose();
+      }
+      tiles.clear();
+      score = 0;
+      gameOver = false;
+      won = false;
+      isMoving = false;
+      _tileIdCounter = 0;
+      _addRandomTile();
+      _addRandomTile();
+    });
   }
 
   Color _getTileColor(int value) {
@@ -115,14 +211,14 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       vsync: this,
     );
 
-    // Scale animation
+    // Animation de mise à l'échelle
     final scale = TweenSequence<double>([
       TweenSequenceItem(
-        tween: Tween<double>(begin: 1.0, end: 1.0 + pi/40),
+        tween: Tween<double>(begin: 1.0, end: 1.05),
         weight: 1,
       ),
       TweenSequenceItem(
-        tween: Tween<double>(begin: 1.0, end: 1.0 + pi/40),
+        tween: Tween<double>(begin: 1.05, end: 1.0),
         weight: 1,
       ),
     ]).animate(
@@ -132,18 +228,18 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       ),
     );
 
-    // Oscillation animation
+    // Animation d'oscillation
     final oscillate = TweenSequence<double>([
       TweenSequenceItem(
-        tween: Tween<double>(begin: 0, end: pi/50),
+        tween: Tween<double>(begin: 0, end: 0.05),
         weight: 1,
       ),
       TweenSequenceItem(
-        tween: Tween<double>(begin: pi/50, end: -pi/50),
+        tween: Tween<double>(begin: 0.05, end: -0.05),
         weight: 2,
       ),
       TweenSequenceItem(
-        tween: Tween<double>(begin: -pi/50, end: 0),
+        tween: Tween<double>(begin: -0.05, end: 0),
         weight: 1,
       ),
     ]).animate(
@@ -153,11 +249,11 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       ),
     );
 
-    // Color flash animation
+    // Animation de flash de couleur
     final baseColor = _getTileColor(tile.value);
     final highlightColor = HSLColor.fromColor(baseColor)
-        .withLightness(pi/4)
-        .withSaturation(pi/4)
+        .withLightness(min(1.0, HSLColor.fromColor(baseColor).lightness + 0.2))
+        .withSaturation(min(1.0, HSLColor.fromColor(baseColor).saturation + 0.2))
         .toColor();
 
     final colorFlash = TweenSequence<Color?>([
@@ -202,7 +298,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
   Future<void> _playMergeSound() async {
     // Sélection du son basée sur une valeur aléatoire
-    int index = (random.nextDouble() * 3).floor();  // 0, 1, ou 2
+    int index = random.nextInt(popSounds.length); // 0, 1, ou 2
     try {
       await audioPlayer.play(popSounds[index]);
     } catch (e) {
@@ -425,23 +521,6 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     }
   }
 
-  void _resetGame() {
-    setState(() {
-      for (var tile in tiles) {
-        tile.appearAnimationController?.dispose();
-        tile.mergeAnimationController?.dispose();
-      }
-      tiles.clear();
-      score = 0;
-      gameOver = false;
-      won = false;
-      isMoving = false;
-      _tileIdCounter = 0;
-      _addRandomTile();
-      _addRandomTile();
-    });
-  }
-
   Widget _buildTile(Tile tile) {
     Widget tileWidget = Container(
       width: cellSize,
@@ -502,162 +581,191 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildBannerAd() {
+    if (_bannerAd == null) {
+      return const SizedBox(height: 0);
+    } else {
+      return Container(
+        alignment: Alignment.center,
+        width: _bannerAd!.size.width.toDouble(),
+        height: _bannerAd!.size.height.toDouble(),
+        child: AdWidget(ad: _bannerAd!),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xffFAF8EF),
-      body: SafeArea(
-        child: GestureDetector(
-          onPanEnd: _onPanEnd,
-          child: Center(
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Text(
-                          '2048',
-                          style: TextStyle(
-                            fontSize: 66,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xff776E65),
-                          ),
-                        ),
-                        const SizedBox(width: 20),
-                        IconButton(
-                          onPressed: () {
-                            setState(() {
-                              vibrationEnabled = !vibrationEnabled;
-                            });
-                          },
-                          icon: Icon(
-                            Icons.vibration,  // Toujours utiliser l'icône vibration
-                            color: vibrationEnabled
-                                ? const Color(0xff776E65)  // Couleur normale quand activé
-                                : const Color(0xffbbada0),
-                            size: 30,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      'Score: $score',
-                      style: const TextStyle(
-                        fontSize: 44,
-                        color: Color(0xff776E65),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Container(
-                      width: 360,
-                      height: 360,
-                      padding: const EdgeInsets.all(gridPadding),
-                      decoration: BoxDecoration(
-                        color: const Color(0xffBBADA0),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          // Grid background
-                          for (int x = 0; x < gridSize; x++)
-                            for (int y = 0; y < gridSize; y++)
-                              Positioned(
-                                left: y * cellSpacing + gridPadding,
-                                top: x * cellSpacing + gridPadding,
-                                child: Container(
-                                  width: cellSize,
-                                  height: cellSize,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xffCDC1B4),
-                                    borderRadius: BorderRadius.circular(3),
+      body: Stack(
+        children: [
+          SafeArea(
+            // Contenu principal
+            child: Column(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onPanEnd: _onPanEnd,
+                    child: Center(
+                      child: SingleChildScrollView(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Text(
+                                    '2048',
+                                    style: TextStyle(
+                                      fontSize: 66,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xff776E65),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 20),
+                                  IconButton(
+                                    onPressed: () {
+                                      setState(() {
+                                        vibrationEnabled = !vibrationEnabled;
+                                      });
+                                    },
+                                    icon: Icon(
+                                      Icons.vibration,
+                                      color: vibrationEnabled
+                                          ? const Color(0xff776E65)
+                                          : const Color(0xffbbada0),
+                                      size: 30,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Text(
+                                'Score: $score',
+                                style: const TextStyle(
+                                  fontSize: 44,
+                                  color: Color(0xff776E65),
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              Container(
+                                width: 360,
+                                height: 360,
+                                padding: const EdgeInsets.all(gridPadding),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xffBBADA0),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    // Grille de fond
+                                    for (int x = 0; x < gridSize; x++)
+                                      for (int y = 0; y < gridSize; y++)
+                                        Positioned(
+                                          left: y * cellSpacing + gridPadding,
+                                          top: x * cellSpacing + gridPadding,
+                                          child: Container(
+                                            width: cellSize,
+                                            height: cellSize,
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xffCDC1B4),
+                                              borderRadius:
+                                              BorderRadius.circular(3),
+                                            ),
+                                          ),
+                                        ),
+                                    // Tuiles
+                                    ...tiles.map(_buildTile).toList(),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              if (gameOver)
+                                const Text(
+                                  'Game Over!',
+                                  style: TextStyle(
+                                    fontSize: 32,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xff776E65),
                                   ),
                                 ),
-                              ),
-                          // Tiles
-                          ...tiles.map(_buildTile).toList(),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    if (gameOver)
-                      const Text(
-                        'Game Over!',
-                        style: TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xff776E65),
-                        ),
-                      ),
-                    if (won && !gameOver)
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: const Color(0xEEEEE4DA),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text(
-                              'You Win!',
-                              style: TextStyle(
-                                fontSize: 32,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xff776E65),
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            ElevatedButton(
-                              onPressed: () => setState(() => won = false),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xff8f7a66),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                  vertical: 10,
+                              if (won && !gameOver)
+                                Container(
+                                  padding: const EdgeInsets.all(20),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xEEEEE4DA),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text(
+                                        'You Win!',
+                                        style: TextStyle(
+                                          fontSize: 32,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xff776E65),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      ElevatedButton(
+                                        onPressed: () => setState(() => won = false),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xff8f7a66),
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 20,
+                                            vertical: 10,
+                                          ),
+                                        ),
+                                        child: const Text(
+                                          'Continue Playing',
+                                          style: TextStyle(fontSize: 16),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              const SizedBox(height: 20),
+                              ElevatedButton(
+                                onPressed: _resetGame,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xff8f7a66),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 30,
+                                    vertical: 15,
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Reset Game',
+                                  style: TextStyle(fontSize: 18),
                                 ),
                               ),
-                              child: const Text(
-                                'Continue Playing',
-                                style: TextStyle(fontSize: 16),
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    const SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: _resetGame,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xff8f7a66),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 30,
-                          vertical: 15,
-                        ),
-                      ),
-                      child: const Text(
-                        'Reset Game',
-                        style: TextStyle(fontSize: 18),
                       ),
                     ),
-                  ],
+                  ),
                 ),
-              ),
+                // Publicité Bannière en bas
+                _buildBannerAd(),
+              ],
             ),
           ),
-        ),
+        ],
       ),
     );
   }
 
   @override
   void dispose() {
+    _bannerAd?.dispose();
+    _interstitialAd?.dispose();
     for (var tile in tiles) {
       tile.appearAnimationController?.dispose();
       tile.mergeAnimationController?.dispose();
