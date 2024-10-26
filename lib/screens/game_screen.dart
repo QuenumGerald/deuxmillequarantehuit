@@ -40,6 +40,7 @@ class Tile {
 
 class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   static const int gridSize = 4;
+  bool vibrationEnabled = true;
   late List<Tile> tiles;
   int score = 0;
   bool gameOver = false;
@@ -47,6 +48,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   int _tileIdCounter = 0;
   final Random random = Random();
   final AudioPlayer audioPlayer = AudioPlayer();
+  late List<Source> popSounds;
   bool isMoving = false;
 
   // Constantes pour la grille
@@ -58,6 +60,12 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    popSounds = [
+      AssetSource('merge.mp3'),
+      AssetSource('merge1.mp3'),
+      AssetSource('merge2.mp3'),
+    ];
+    audioPlayer.setReleaseMode(ReleaseMode.stop);
     _initializeGame();
   }
 
@@ -65,6 +73,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     tiles = [];
     _addRandomTile();
     _addRandomTile();
+
   }
 
   Color _getTileColor(int value) {
@@ -192,7 +201,13 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _playMergeSound() async {
-    await audioPlayer.play(AssetSource('merge.mp3'));
+    // Sélection du son basée sur une valeur aléatoire
+    int index = (random.nextDouble() * 3).floor();  // 0, 1, ou 2
+    try {
+      await audioPlayer.play(popSounds[index]);
+    } catch (e) {
+      print("Erreur de lecture du son: $e");
+    }
   }
 
   Future<void> _playGameOverSound() async {
@@ -334,7 +349,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
           score += tile.value;
           _setupMergeAnimation(tile);
           _playMergeSound();
-          Vibration.vibrate(duration: 100);
+          if (vibrationEnabled) {  // Vérifier si la vibration est activée
+            Vibration.vibrate(duration: 30);
+          }
           break;
         } else {
           break;
@@ -488,134 +505,154 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-        backgroundColor: const Color(0xffFAF8EF),
-        body: SafeArea(
+      backgroundColor: const Color(0xffFAF8EF),
+      body: SafeArea(
         child: GestureDetector(
-        onPanEnd: _onPanEnd,
-        child: Center(
-        child: SingleChildScrollView(
-        child: Padding(
-        padding: const EdgeInsets.all(16.0),
-    child: Column(
-    mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Text(
-          '2048',
-          style: TextStyle(
-            fontSize: 66,
-            fontWeight: FontWeight.bold,
-            color: Color(0xff776E65),
-          ),
-        ),
-        Text(
-          'Score: $score',
-          style: const TextStyle(
-            fontSize: 44,
-            color: Color(0xff776E65),
-          ),
-        ),
-        const SizedBox(height: 20),
-        Container(
-          width: 360,
-          height: 360,
-          padding: const EdgeInsets.all(gridPadding),
-          decoration: BoxDecoration(
-            color: const Color(0xffBBADA0),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              // Grid background
-              for (int x = 0; x < gridSize; x++)
-                for (int y = 0; y < gridSize; y++)
-                  Positioned(
-                    left: y * cellSpacing + gridPadding,
-                    top: x * cellSpacing + gridPadding,
-                    child: Container(
-                      width: cellSize,
-                      height: cellSize,
-                      decoration: BoxDecoration(
-                        color: const Color(0xffCDC1B4),
-                        borderRadius: BorderRadius.circular(3),
+          onPanEnd: _onPanEnd,
+          child: Center(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text(
+                          '2048',
+                          style: TextStyle(
+                            fontSize: 66,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xff776E65),
+                          ),
+                        ),
+                        const SizedBox(width: 20),
+                        IconButton(
+                          onPressed: () {
+                            setState(() {
+                              vibrationEnabled = !vibrationEnabled;
+                            });
+                          },
+                          icon: Icon(
+                            Icons.vibration,  // Toujours utiliser l'icône vibration
+                            color: vibrationEnabled
+                                ? const Color(0xff776E65)  // Couleur normale quand activé
+                                : const Color(0xffbbada0),
+                            size: 30,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      'Score: $score',
+                      style: const TextStyle(
+                        fontSize: 44,
+                        color: Color(0xff776E65),
                       ),
                     ),
-                  ),
-              // Tiles
-              ...tiles.map(_buildTile).toList(),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        if (gameOver)
-          const Text(
-            'Game Over!',
-            style: TextStyle(
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-              color: Color(0xff776E65),
-            ),
-          ),
-        if (won && !gameOver)
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: const Color(0xEEEEE4DA),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'You Win!',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xff776E65),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                ElevatedButton(
-                  onPressed: () => setState(() => won = false),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xff8f7a66),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 10,
+                    const SizedBox(height: 20),
+                    Container(
+                      width: 360,
+                      height: 360,
+                      padding: const EdgeInsets.all(gridPadding),
+                      decoration: BoxDecoration(
+                        color: const Color(0xffBBADA0),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          // Grid background
+                          for (int x = 0; x < gridSize; x++)
+                            for (int y = 0; y < gridSize; y++)
+                              Positioned(
+                                left: y * cellSpacing + gridPadding,
+                                top: x * cellSpacing + gridPadding,
+                                child: Container(
+                                  width: cellSize,
+                                  height: cellSize,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xffCDC1B4),
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                ),
+                              ),
+                          // Tiles
+                          ...tiles.map(_buildTile).toList(),
+                        ],
+                      ),
                     ),
-                  ),
-                  child: const Text(
-                    'Continue Playing',
-                    style: TextStyle(fontSize: 16),
-                  ),
+                    const SizedBox(height: 20),
+                    if (gameOver)
+                      const Text(
+                        'Game Over!',
+                        style: TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xff776E65),
+                        ),
+                      ),
+                    if (won && !gameOver)
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: const Color(0xEEEEE4DA),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              'You Win!',
+                              style: TextStyle(
+                                fontSize: 32,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xff776E65),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ElevatedButton(
+                              onPressed: () => setState(() => won = false),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xff8f7a66),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                  vertical: 10,
+                                ),
+                              ),
+                              child: const Text(
+                                'Continue Playing',
+                                style: TextStyle(fontSize: 16),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: _resetGame,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xff8f7a66),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 30,
+                          vertical: 15,
+                        ),
+                      ),
+                      child: const Text(
+                        'Reset Game',
+                        style: TextStyle(fontSize: 18),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-        const SizedBox(height: 20),
-        ElevatedButton(
-          onPressed: _resetGame,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xff8f7a66),
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(
-              horizontal: 30,
-              vertical: 15,
-            ),
-          ),
-          child: const Text(
-            'Reset Game',
-            style: TextStyle(fontSize: 18),
-          ),
         ),
-      ],
-    ),
-        ),
-        ),
-        ),
-        ),
-        ),
+      ),
     );
   }
 
